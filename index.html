@@ -12,7 +12,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Jimmy">
-<script>window.__PWA__ = true; window.__BUILD__ = '2821aa3345'; window.__BUILT__ = '2026-11-01 00:48';</script>
+<script>window.__PWA__ = true; window.__BUILD__ = '15a0ec5d27'; window.__BUILT__ = '2026-11-01 02:52';</script>
 <style>[hidden]{display:none!important} body{margin:0} header{top:0 !important; padding-top:env(safe-area-inset-top,0px)}</style>
 </head>
 <body>
@@ -172,9 +172,11 @@ nav button[aria-current="page"]{ color:var(--acc); font-weight:700; }
 .abl{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
 .abl div{ background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:8px 4px; display:grid; justify-items:center; min-width:0; }
 .abl span{ font-size:.72rem; font-weight:700; letter-spacing:.1em; color:var(--muted); }
-.abl b{ font-family:var(--display); font-size:1.9rem; line-height:1.05; color:var(--acc); }
-.abl i{ font-style:normal; font-weight:700; font-size:.95rem; }
-.abl em{ font-style:normal; font-size:.78rem; color:var(--muted); margin-top:2px; white-space:nowrap; }
+/* the modifier is the big number, the score under it (owner 2026-11-01): the H4b rule-basis spans inside b / i took the label rule above and shrank both */
+.abl b{ order:2; font-weight:700; font-size:1rem; line-height:1.2; color:var(--acc); }
+.abl i{ order:1; font-style:normal; font-family:var(--display); font-weight:700; font-size:1.9rem; line-height:1.05; color:var(--acc); }
+.abl b span, .abl i span, .abl em span{ font-size:inherit; font-weight:inherit; letter-spacing:inherit; }
+.abl em{ order:3; font-style:normal; font-size:.78rem; color:var(--muted); margin-top:2px; white-space:nowrap; }
 .abl .pr{ border-color:var(--acc); }
 .abl .pr em{ color:var(--acc); font-weight:700; }
 .skills{ list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 6px; }
@@ -8969,16 +8971,19 @@ const SP = (() => {
   const state = { sel: DEFAULT.slice(), limit: 9 };
   const saved = load(KEY, null);
   if (saved) { if (Array.isArray(saved.sel)) state.sel = saved.sel.filter(id => BY[id] && onList(BY[id]) && !always(BY[id])); if (saved.limit > 0) state.limit = saved.limit; }
-  const save = () => store(KEY, state);
+  const save = () => { store(KEY, state); askPersist(); };
   // Magic Initiate (Cleric, Acolyte): two cantrips and one level 1 spell of the Cleric list, picked by the player (D49);
   // the level 1 spell is always prepared and cast once per long rest without a slot (SLOTS)
   const MI_C = items.filter(s => s.cl.includes('MC')).map(s => s.id), MI_1 = items.filter(s => s.cl.includes('M1')).map(s => s.id);
   const MI_N = { c: 2, s: 1 };
   // the player's picks (owner 2026-10-31: "sacred flame toll the dead guiding bolt") are the first selection; changeable here
   const MI_DEFAULT = { c: ['sacred-flame', 'toll-the-dead'], s: 'guiding-bolt' };
-  const mi = (() => { const v = load(MI_KEY, null) || MI_DEFAULT; return { c: (Array.isArray(v.c) ? v.c : []).filter(id => MI_C.includes(id)).slice(0, MI_N.c), s: MI_1.includes(v.s) ? v.s : null }; })();
+  const mi = (() => { const v = load(MI_KEY, null) || MI_DEFAULT; return { c: (Array.isArray(v.c) ? v.c : []).filter(id => MI_C.includes(id)).slice(0, MI_N.c), s: MI_1.includes(v.s) ? v.s : null, ...(MI_1.includes(v.drop) && v.drop === v.s ? { drop: v.drop } : {}) }; })();
   const saveMi = () => { store(MI_KEY, mi); askPersist(); };
   const isMi = id => mi.c.includes(id) || mi.s === id;
+  // a Magic Initiate level 1 pick that is also on the Paladin list is always prepared by the feat, not one of the 9 (H5 review);
+  // `drop` remembers that it was taken out of the prepared list, so it comes back when the pick moves away (H5c)
+  if (mi.s && state.sel.includes(mi.s)) { state.sel = state.sel.filter(id => id !== mi.s); save(); mi.drop = mi.s; saveMi(); }
   const ICON = (() => {
     const m = {
       fire: ['searing-smite','sacred-flame'],
@@ -9065,8 +9070,14 @@ const SP = (() => {
     syncTile(id) {
       for (const t of C.all.querySelectorAll(`.tile[data-id="${id}"]`)) {
         const on = t.classList.contains('mi') ? isMi(id) : isSel(id);
+        const p = t.querySelector('.pick');
+        // H5c: a Paladin-list tile whose spell became / stopped being the Magic Initiate pick swaps its prepare button
+        // and its "Magic Initiate" label: drawn again, keeping the filter's hidden state
+        if (!t.classList.contains('mi') && !always(BY[id]) && (isMi(id) && !state.sel.includes(id)) === !!p) {
+          const box = document.createElement('div'); box.innerHTML = tile(BY[id]); const nt = box.firstElementChild; nt.hidden = t.hidden; t.replaceWith(nt); continue;
+        }
         t.classList.toggle('on', on);
-        const p = t.querySelector('.pick'); if (p) p.setAttribute('aria-pressed', String(on));
+        if (p) p.setAttribute('aria-pressed', String(on));
       }
     },
     renderPrep() {
@@ -9126,13 +9137,26 @@ const SP = (() => {
       const s = BY[id]; if (!s || always(s) || !onList(s)) return null;
       const i = state.sel.indexOf(id);
       if (i >= 0) { state.sel.splice(i, 1); save(); return `${s.en} hazırlıktan çıkarıldı`; }
+      if (isMi(id)) return { blocked: `${s.en} Magic Initiate seçimin: her zaman hazır, sayıya girmez.` };
       if (count() >= state.limit) return { blocked: `Hazırlama hakkın dolu (${state.limit}/${state.limit}). Önce bir büyü çıkar.` };
       state.sel.push(id); save(); return `${s.en} hazırlandı · ${count()}/${state.limit}`;
     },
     // Magic Initiate pick (kind 'c' cantrip, 's' the level 1 spell): returns a toast or { blocked }
     miToggle(kind, id) {
       const s = BY[id]; if (!s) return null;
-      if (kind === 's') { mi.s = mi.s === id ? null : id; saveMi(); SLOTS.refresh(); return mi.s ? `${s.en} seçildi · Magic Initiate` : `${s.en} seçimden çıkarıldı`; }
+      if (kind === 's') {
+        const old = mi.s, dropped = old && mi.drop === old ? BY[old] : null;
+        mi.s = mi.s === id ? null : id; delete mi.drop;
+        if (mi.s && state.sel.includes(id)) { state.sel.splice(state.sel.indexOf(id), 1); save(); mi.drop = id; }
+        // H5c (H5b review note): the old pick taken out of the prepared list goes back if a preparation is free, else the toast says so
+        let back = '';
+        if (dropped && old !== mi.s) {
+          if (count() < state.limit) { state.sel.push(old); save(); back = ` · ${dropped.en} yeniden hazırlandı (${count()}/${state.limit})`; }
+          else back = ` · ${dropped.en} hazırlıktan çıkmıştı: hazırlama hakkın dolu (${state.limit}/${state.limit}), yeniden hazırlaman gerek`;
+        }
+        saveMi(); SLOTS.refresh();
+        return (mi.s ? `${s.en} seçildi · Magic Initiate` : `${s.en} seçimden çıkarıldı`) + back;
+      }
       const i = mi.c.indexOf(id);
       if (i >= 0) { mi.c.splice(i, 1); saveMi(); return `${s.en} seçimden çıkarıldı`; }
       if (mi.c.length >= MI_N.c) return { blocked: `İki cantrip seçili. Önce birini çıkar.` };
@@ -9147,6 +9171,7 @@ const SP = (() => {
       if (always(s)) btn = `<button disabled><span lang="en">${FROM[s.from]}</span> — her zaman hazır</button>`;
       else if (!onList(s)) btn = `<button data-mi="${s.lvl ? 's' : 'c'}:${id}">${isMi(id) ? 'Magic Initiate seçiminden çıkar' : 'Magic Initiate olarak seç'}</button>`;
       else if (on) btn = `<button class="rm" data-c="sp" data-pick="${id}">Hazırlıktan çıkar</button>`;
+      else if (isMi(id)) btn = `<button disabled><span lang="en">Magic Initiate</span> — her zaman hazır</button>`;
       else btn = count() >= state.limit ? `<button disabled>Hazırlama hakkın dolu (${state.limit}/${state.limit})</button>` : `<button data-c="sp" data-pick="${id}">Hazırla · ${count() + 1}/${state.limit}</button>`;
       return `
         <div class="sh-top">${icon(s)}<div><h2 id="shName" lang="en">${esc(s.en)}</h2><p>${esc(s.tr)} · ${lvlName(s.lvl)} · ${esc(s.school)}</p></div>
